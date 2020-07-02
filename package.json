@@ -28,13 +28,14 @@
   "license": "0BSD",
   "scripts": {
     "build": "gatsby build",
-    "develop": "gatsby develop -H 0.0.0.0",
+    "develop": "gatsby develop",
     "format": "prettier --write \"**/*.{js,jsx,ts,tsx,json,md}\"",
-    "start": "npm run develop",
+    "start": "gatsby develop -H 0.0.0.0",
     "serve": "gatsby serve",
+    "serve:prod": "gatsby build && gatsby serve",
     "clean": "gatsby clean",
     "test": "echo \"Write tests! -> https://gatsby.dev/unit-testing\" && exit 1",
-    "deploy": "gatsby-plugin-s3 deploy"
+    "deploy": "npm run build && npx -n \"-r dotenv/config\" gatsby-plugin-s3 deploy"
   },
   "repository": {
     "type": "git",

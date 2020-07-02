@@ -1,3 +1,4 @@
+require("dotenv").config();
 module.exports = {
   siteMetadata: {
     title: `Gatsby Default Starter`,
@@ -30,7 +31,9 @@ module.exports = {
     {
       resolve: `gatsby-plugin-s3`,
       options: {
-	  bucketName: "my-website-bucket",
+	  bucketName: process.env.S3_BUCKET_NAME,
+	  protocol: "https",
+	  hostname: process.env.HOSTNAME
       },
     },
     // this (optional) plugin enables Progressive Web App + Offline functionality
