@@ -1,0 +1,143 @@
+# This script creates an S3 Bucket that hosts a Gatsby static site on AWS
+# Based on https://www.ryanjyost.com/create-bucket-with-cloudformation/
+# Use AWS CLI to execute the file like the below snippet
+# Change the stack-name, BucketName, DistrobutionDomain, and Environment.
+# If you have multiple aws profiles you can specify the correct one by adding
+# --profile myprofile to the end of your command.
+#
+# aws cloudformation deploy --template-file ./aws-s3-cloudformation.yml --stack-name psu-news-gatsby-staging --parameter-overrides BucketName=psu-news-gastby DistributionDomain=mydomain.org Environment=staging --capabilities CAPABILITY_NAMED_IAM
+#
+# Delete resources: Running this command using the stack-name will delete all
+# resources that were created. Note: This will fail if the S3 bucket has files
+# in it. This is not a bug but a feature.
+# aws cloudformation delete-stack --stack-name psu-news-gatsby-staging
+
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters: # params passed to "--parameter-overrides" in CLI
+  BucketName:
+    Description: Unique name for your bucket. This will be in the S3 url to your Gatsby site
+    Type: String
+  Environment:
+    Description: The name of the environment used in the BucketName.
+    Type: String
+  DefaultRootObject:
+    Description: 'The default path for the index document.'
+    Type: String
+    Default: 'index.html'
+  DistributionDomain:
+    Description: The name of the Distribution Domain.
+    Type: String
+
+Resources:
+  # Create an S3 Bucket that serves a static website (i.e. GatsbyJS App)
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Join ['', [!Ref BucketName, '-', !Ref Environment]]
+      AccessControl: PublicRead # visitors need to be able to access the site
+      WebsiteConfiguration: # this makes the S3 Bucket a static website/app
+        IndexDocument: index.html # default object served when visiting S3 domain
+        ErrorDocument: index.html # just send to app, let React handle errors and routing
+      CorsConfiguration:
+        CorsRules:
+        - AllowedHeaders: ['*']
+          AllowedMethods: [GET]
+          AllowedOrigins: ['*']
+          ExposedHeaders: [Date]
+          Id: myCORSRuleId1
+          MaxAge: '3600'
+
+  # Add a Bucket Policy that allows public access to the resources
+  MyBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3Bucket # attach to bucket being created
+      PolicyDocument:
+        Id: MyS3WebFilePolicy
+        Version: 2012-10-17
+        Statement: # lets the public access/view the contents of your Bucket, i.e. web app
+          - Sid: AllowPublicRead
+            Effect: Allow
+            Principal:
+              AWS: '*' # wildcard, allow all requests
+            Action: 's3:GetObject'
+            Resource: !Join ['', ['arn:aws:s3:::', !Ref S3Bucket, /*]]
+
+  CloudFrontOriginAccessIdentity:
+    Type: 'AWS::CloudFront::CloudFrontOriginAccessIdentity'
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment: !Ref S3Bucket
+
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        CustomErrorResponses:
+        - ErrorCode: 403 # not found
+          ResponseCode: 200
+          ResponsePagePath: /index.html
+        DefaultCacheBehavior:
+          AllowedMethods:
+          - GET
+          - HEAD
+          - OPTIONS
+          CachedMethods:
+          - GET
+          - HEAD
+          - OPTIONS
+          Compress: true
+          DefaultTTL: 3600 # in seconds
+          ForwardedValues:
+            Cookies:
+              Forward: none
+            QueryString: false
+          MaxTTL: 86400 # in seconds
+          MinTTL: 60 # in seconds
+          TargetOriginId: s3origin
+          ViewerProtocolPolicy: 'redirect-to-https'
+        DefaultRootObject: !Ref DefaultRootObject
+        Enabled: true
+        HttpVersion: http2
+        Origins:
+        - Id: s3origin
+          DomainName: !GetAtt 'S3Bucket.DomainName'
+          S3OriginConfig:
+            OriginAccessIdentity: !Sub 'origin-access-identity/cloudfront/${CloudFrontOriginAccessIdentity}'
+        - Id: myCustomOrigin
+          DomainName: !Ref DistributionDomain
+          CustomOriginConfig:
+            HTTPPort: '80'
+            HTTPSPort: '443'
+            OriginProtocolPolicy: https-only
+        PriceClass: 'PriceClass_All'
+
+  # IAM User that has rights to publish content to S3
+  PublishUser:
+    Type: 'AWS::IAM::User'
+    Properties:
+      Policies:
+        - PolicyName: !Sub 'publish-to-${S3Bucket}'
+          PolicyDocument:
+            Statement:
+            - Action: 's3:*'
+              Effect: Allow
+              Resource:
+              - !Sub 'arn:aws:s3:::${S3Bucket}'
+              - !Sub 'arn:aws:s3:::${S3Bucket}/*'
+  PublishCredentials:
+    Type: 'AWS::IAM::AccessKey'
+    Properties:
+      UserName: !Ref PublishUser
+
+Outputs:
+  WebsiteURL:
+    Value: !GetAtt S3Bucket.WebsiteURL
+    Description: URL for website files hosted on S3
+  AccessKeyId:
+    Description: S3 Access Key
+    Value: !Ref PublishCredentials
+  AccessKeySecret:
+    Description: S3 Secret Key
+    Value: !GetAtt PublishCredentials.SecretAccessKey
